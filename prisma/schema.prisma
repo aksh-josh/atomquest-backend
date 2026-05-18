@@ -1,0 +1,169 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  EMPLOYEE
+  MANAGER
+  ADMIN
+}
+
+enum GoalStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  LOCKED
+}
+
+enum UoMType {
+  NUMERIC_MIN
+  NUMERIC_MAX
+  PERCENT_MIN
+  PERCENT_MAX
+  TIMELINE
+  ZERO_BASED
+}
+
+enum ProgressStatus {
+  NOT_STARTED
+  ON_TRACK
+  COMPLETED
+}
+
+enum CyclePhase {
+  GOAL_SETTING
+  Q1_CHECKIN
+  Q2_CHECKIN
+  Q3_CHECKIN
+  Q4_ANNUAL
+}
+
+model User {
+  id          String   @id @default(cuid())
+  name        String
+  email       String   @unique
+  password    String
+  role        Role     @default(EMPLOYEE)
+  department  String?
+  managerId   String?
+  manager     User?    @relation("ManagerEmployee", fields: [managerId], references: [id])
+  reportees   User[]   @relation("ManagerEmployee")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  goalSheets    GoalSheet[]
+  checkinsDone  CheckIn[]     @relation("CheckinByManager")
+  auditLogs     AuditLog[]
+}
+
+model GoalCycle {
+  id          String     @id @default(cuid())
+  name        String     // e.g., "FY 2025-26"
+  phase       CyclePhase
+  startDate   DateTime
+  endDate     DateTime
+  isActive    Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+
+  goalSheets  GoalSheet[]
+  checkIns    CheckIn[]
+}
+
+model ThrustArea {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  isActive    Boolean @default(true)
+
+  goals       Goal[]
+}
+
+model GoalSheet {
+  id          String     @id @default(cuid())
+  employeeId  String
+  employee    User       @relation(fields: [employeeId], references: [id])
+  cycleId     String
+  cycle       GoalCycle  @relation(fields: [cycleId], references: [id])
+  status      GoalStatus @default(DRAFT)
+  submittedAt DateTime?
+  approvedAt  DateTime?
+  rejectedAt  DateTime?
+  managerNote String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  goals       Goal[]
+  checkIns    CheckIn[]
+  auditLogs   AuditLog[]
+
+  @@unique([employeeId, cycleId])
+}
+
+model Goal {
+  id            String      @id @default(cuid())
+  goalSheetId   String
+  goalSheet     GoalSheet   @relation(fields: [goalSheetId], references: [id], onDelete: Cascade)
+  thrustAreaId  String
+  thrustArea    ThrustArea  @relation(fields: [thrustAreaId], references: [id])
+  title         String
+  description   String?
+  uom           UoMType
+  target        Float
+  targetDate    DateTime?   // for TIMELINE uom
+  weightage     Float       // must be >= 10, sum across sheet = 100
+  isShared      Boolean     @default(false)
+  parentGoalId  String?     // if this goal was pushed from admin/manager
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  achievements  Achievement[]
+}
+
+model Achievement {
+  id              String         @id @default(cuid())
+  goalId          String
+  goal            Goal           @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  quarter         CyclePhase
+  actualValue     Float?
+  completionDate  DateTime?      // for TIMELINE uom
+  status          ProgressStatus @default(NOT_STARTED)
+  score           Float?         // system-computed
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@unique([goalId, quarter])
+}
+
+model CheckIn {
+  id           String    @id @default(cuid())
+  goalSheetId  String
+  goalSheet    GoalSheet @relation(fields: [goalSheetId], references: [id])
+  cycleId      String
+  cycle        GoalCycle @relation(fields: [cycleId], references: [id])
+  managerId    String
+  manager      User      @relation("CheckinByManager", fields: [managerId], references: [id])
+  quarter      CyclePhase
+  comment      String?
+  completedAt  DateTime  @default(now())
+
+  @@unique([goalSheetId, quarter])
+}
+
+model AuditLog {
+  id           String    @id @default(cuid())
+  goalSheetId  String?
+  goalSheet    GoalSheet? @relation(fields: [goalSheetId], references: [id])
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  action       String    // e.g., "GOAL_EDITED", "STATUS_CHANGED"
+  details      Json?     // what changed: { field, oldValue, newValue }
+  createdAt    DateTime  @default(now())
+}
