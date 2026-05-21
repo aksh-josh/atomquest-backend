@@ -9,6 +9,7 @@ const goalRoutes = require('./routes/goals.routes');
 const checkinRoutes = require('./routes/checkins.routes');
 const adminRoutes = require('./routes/admin.routes');
 const reportRoutes = require('./routes/reports.routes');
+const notifRoutes = require('./routes/notifications.routes');
 
 const app = express();
 
@@ -31,6 +32,7 @@ app.use('/api/goals', goalRoutes);
 app.use('/api/checkins', checkinRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/notifications', notifRoutes);
 
 // 404 handler
 app.use((req, res) => {

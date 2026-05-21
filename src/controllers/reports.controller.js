@@ -115,4 +115,60 @@ const getCompletionReport = async (req, res, next) => {
   }
 };
 
-module.exports = { getAchievementReport, getCompletionReport };
+module.exports = { getAchievementReport, getCompletionReport, getLeaderboard };
+
+// GET /api/reports/leaderboard
+async function getLeaderboard(req, res, next) {
+  try {
+    const cycle = await prisma.goalCycle.findFirst({ where: { isActive: true } });
+    if (!cycle) return res.status(404).json({ error: 'No active cycle' });
+
+    const sheets = await prisma.goalSheet.findMany({
+      where: { cycleId: cycle.id, status: { in: ['APPROVED', 'LOCKED'] } },
+      include: {
+        employee: {
+          select: {
+            name: true, email: true, department: true,
+            manager: { select: { name: true } },
+          },
+        },
+        goals: { include: { achievements: true, thrustArea: true } },
+      },
+    });
+
+    const { computeOverallScore } = require('../services/score.service');
+
+    const leaderboard = sheets
+      .map((sheet, idx) => {
+        const score = computeOverallScore(sheet.goals);
+        return {
+          rank: 0,
+          employee: sheet.employee,
+          department: sheet.employee.department || 'Unknown',
+          manager: sheet.employee.manager?.name || '—',
+          goalCount: sheet.goals.length,
+          overallScore: Math.round(score * 10) / 10,
+          checkInCount: 0,
+          topGoal: sheet.goals.sort((a, b) => (b.weightage - a.weightage))[0]?.title || '—',
+        };
+      })
+      .sort((a, b) => b.overallScore - a.overallScore)
+      .map((entry, idx) => ({ ...entry, rank: idx + 1 }));
+
+    // Department leaderboard
+    const byDept = leaderboard.reduce((acc, e) => {
+      if (!acc[e.department]) acc[e.department] = { dept: e.department, totalScore: 0, count: 0 };
+      acc[e.department].totalScore += e.overallScore;
+      acc[e.department].count += 1;
+      return acc;
+    }, {});
+
+    const deptLeaderboard = Object.values(byDept)
+      .map(d => ({ ...d, avgScore: Math.round((d.totalScore / d.count) * 10) / 10 }))
+      .sort((a, b) => b.avgScore - a.avgScore);
+
+    res.json({ cycle, leaderboard, deptLeaderboard });
+  } catch (err) {
+    next(err);
+  }
+}

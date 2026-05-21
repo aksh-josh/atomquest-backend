@@ -67,8 +67,36 @@ const updateUser = async (req, res, next) => {
 // DELETE /api/admin/users/:id
 const deleteUser = async (req, res, next) => {
   try {
-    await prisma.user.delete({ where: { id: req.params.id } });
-    res.json({ message: 'User deleted' });
+    const { id } = req.params;
+
+    if (id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot delete your own account' });
+    }
+
+    // Reassign reportees to no manager
+    await prisma.user.updateMany({
+      where: { managerId: id },
+      data: { managerId: null },
+    });
+
+    // Delete check-ins done BY this user as manager
+    await prisma.checkIn.deleteMany({ where: { managerId: id } });
+
+    // Delete audit logs created by this user
+    await prisma.auditLog.deleteMany({ where: { userId: id } });
+
+    // For each goal sheet owned by this user, clean up related records
+    const sheets = await prisma.goalSheet.findMany({ where: { employeeId: id } });
+    for (const sheet of sheets) {
+      await prisma.checkIn.deleteMany({ where: { goalSheetId: sheet.id } });
+      await prisma.auditLog.deleteMany({ where: { goalSheetId: sheet.id } });
+    }
+    await prisma.goalSheet.deleteMany({ where: { employeeId: id } });
+
+    // Now safe to delete user
+    await prisma.user.delete({ where: { id } });
+
+    res.json({ message: 'User deleted successfully' });
   } catch (err) {
     next(err);
   }
